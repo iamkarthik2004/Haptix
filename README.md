@@ -54,6 +54,8 @@ If the install recommendation was dismissed, clear the Haptix site data in Chrom
 
 After opening the camera page, grant Chrome camera permission and select the rear camera if necessary. Frames are sent to the laptop for analysis; the annotated output is shown in the laptop monitor, while object, distance, and range-status details are printed in the laptop terminal.
 
+Objects whose bounding-box center falls in the upper third of the camera frame are returned to the laptop with `position: "up"` and `position_message: "Object at up position"`. The monitor highlights these objects and the terminal logs `OBJECT AT UP POSITION`. Adjust the upper-zone threshold with `UP_POSITION_MAX_FRAME_RATIO` (default: `0.333`).
+
 Run `./scripts/create-local-cert.sh` again whenever the laptop moves to a network with a different LAN IP. Restart the server afterwards.
 
 ## Docker workflow

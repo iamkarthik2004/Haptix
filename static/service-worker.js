@@ -1,4 +1,4 @@
-const CACHE_NAME = 'haptix-camera-v3';
+const CACHE_NAME = 'haptix-camera-v4';
 const APP_SHELL = [
   '/', '/camera', '/static/styles.css', '/static/pwa.js', '/static/app-icon.svg',
   '/static/app-icon-192.png', '/static/app-icon-512.png', '/manifest.webmanifest'

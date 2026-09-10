@@ -19,6 +19,7 @@ MODEL_NAME = os.getenv("YOLO_MODEL", "yolo26n.pt")
 DETECTION_RANGE_METERS = float(os.getenv("DETECTION_RANGE_METERS", "2"))
 CAMERA_HORIZONTAL_FOV_DEGREES = float(os.getenv("CAMERA_HORIZONTAL_FOV_DEGREES", "65"))
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.35"))
+UP_POSITION_MAX_FRAME_RATIO = float(os.getenv("UP_POSITION_MAX_FRAME_RATIO", "0.333"))
 model = YOLO(MODEL_NAME)
 
 REFERENCE_WIDTHS_METERS = {
@@ -59,6 +60,22 @@ def range_state(distance_m):
     return "outside"
 
 
+def vertical_position(box, frame_height):
+    """Classify an object by the vertical center of its bounding box."""
+    if frame_height <= 0:
+        return "unknown"
+    center_y_ratio = ((box[1] + box[3]) / 2) / frame_height
+    if center_y_ratio <= UP_POSITION_MAX_FRAME_RATIO:
+        return "up"
+    if center_y_ratio >= 1 - UP_POSITION_MAX_FRAME_RATIO:
+        return "down"
+    return "center"
+
+
+def position_message(position):
+    return "Object at up position" if position == "up" else None
+
+
 def print_terminal_detections(frame_id, detections):
     count = len(detections)
     if count == 0:
@@ -78,7 +95,9 @@ def print_terminal_detections(frame_id, detections):
         else:
             color = ANSI_YELLOW
             marker = "UNKNOWN"
-        print(f"  Object {i:<3} | {dist:>6} | {color}● {marker}{ANSI_RESET}")
+        position = det["position"].upper()
+        alert = f" | {ANSI_YELLOW}OBJECT AT UP POSITION{ANSI_RESET}" if det["position"] == "up" else ""
+        print(f"  Object {i:<3} | {dist:>6} | {color}● {marker}{ANSI_RESET} | {position}{alert}")
 
 
 def draw_detections(image, detections):
@@ -89,7 +108,7 @@ def draw_detections(image, detections):
         x1, y1, x2, y2 = detection["box"]
         color = colors[detection["range_state"]]
         draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
-        label = f"Object {i}"
+        label = f"Object {i} · {detection['position'].upper()}"
         label_box = draw.textbbox((x1, y1), label)
         label_top = max(0, y1 - (label_box[3] - label_box[1]) - 10)
         draw.rectangle((x1, label_top, label_box[2] + 8, y1), fill=color)
@@ -129,6 +148,7 @@ def analyze():
             coordinates = [round(value, 1) for value in box.xyxy[0].tolist()]
             label = result.names[class_id]
             distance_m = estimate_distance(label, coordinates, image.width)
+            position = vertical_position(coordinates, image.height)
             detections.append({
                 "class_id": class_id,
                 "label": label,
@@ -136,6 +156,8 @@ def analyze():
                 "box": coordinates,
                 "distance_m": distance_m,
                 "range_state": range_state(distance_m),
+                "position": position,
+                "position_message": position_message(position),
             })
 
         with latest_lock:

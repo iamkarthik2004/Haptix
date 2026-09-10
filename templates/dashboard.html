@@ -20,7 +20,10 @@
       <section class="viewer" aria-label="Live camera feed">
         <div class="viewer-toolbar">
           <span class="eyebrow">Live rear camera</span>
-          <span id="frame-age" class="muted">No frames received</span>
+          <div class="viewer-statuses">
+            <span id="up-position-status" class="muted">No up-position objects</span>
+            <span id="frame-age" class="muted">No frames received</span>
+          </div>
         </div>
         <div class="image-stage">
           <img id="live-frame" alt="Live camera feed" hidden>
@@ -46,6 +49,7 @@
     const connectionText = document.getElementById('connection-text');
     const connectionDot = document.getElementById('connection-dot');
     const frameAge = document.getElementById('frame-age');
+    const upPositionStatus = document.getElementById('up-position-status');
     const cameraUrl = document.getElementById('camera-url');
     const captureUrl = `${window.location.origin}/camera`;
     cameraUrl.href = captureUrl;
@@ -61,6 +65,11 @@
         connectionDot.classList.toggle('online', Boolean(isLive));
         if (data.image) { frame.src = data.image; frame.hidden = false; emptyState.hidden = true; }
         frameAge.textContent = data.received_at ? `${isLive ? 'Live' : 'Last frame'} · ${Math.max(0, Math.round(Date.now() / 1000 - data.received_at))}s ago` : 'No frames received';
+        const upObjects = (data.detections || []).filter((detection) => detection.position === 'up');
+        upPositionStatus.textContent = upObjects.length
+          ? `${upObjects.length === 1 ? 'Object' : `${upObjects.length} objects`} at up position`
+          : 'No up-position objects';
+        upPositionStatus.classList.toggle('up-position-alert', upObjects.length > 0);
       } catch (error) {
         connectionText.textContent = 'Monitor offline';
         connectionDot.classList.remove('online');
