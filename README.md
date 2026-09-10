@@ -1,31 +1,77 @@
-Haptix Vision
-=============
+# Haptix Vision
 
-Run the detector on the laptop, then use the mobile rear camera as the capture device.
+Haptix Vision runs object detection on a laptop while an Android phone supplies its rear-camera video. The laptop is the monitor and detector host; only the Android camera page is offered as an installable PWA.
+
 Both devices must be on the same Wi-Fi network.
 
-1. Install dependencies: `pip install -r requirements.txt`
-2. Start the server: `python app.py`
-3. Open `https://<laptop-ip>:5500` on the laptop for the live monitor.
-4. Open `https://<laptop-ip>:5500/camera` on the phone for the rear-camera capture page.
+## Local workflow
 
-Detection details (Object 1, Object 2, etc. with distance and range status) appear in the laptop terminal.
+### 1. Prepare the laptop
 
-## Docker
+Install the Python dependencies, then create a trusted local HTTPS certificate. HTTPS is required for Android browser camera access and PWA installation.
 
-Build and start the container:
+```bash
+pip install -r requirements.txt
+./scripts/create-local-cert.sh
+python app.py
+```
+
+The certificate script uses `mkcert`, writes the certificate and private key to `.local-certs/`, and includes the laptop's current LAN IP. Those files are local-only and excluded from Git.
+
+If `mkcert` is not installed, on Fedora run:
+
+```bash
+sudo dnf install -y mkcert nss-tools
+```
+
+Keep the server running. It prints the current monitor and camera URLs, for example:
+
+```text
+Laptop monitor: https://192.168.x.x:5500
+Mobile camera:  https://192.168.x.x:5500/camera
+```
+
+### 2. Trust the development CA on Android
+
+The laptop trusts the local CA automatically. Android must trust it separately before Chrome can use the HTTPS camera page without a certificate warning.
+
+1. On the laptop, locate the CA file with `mkcert -CAROOT`. The file to copy is `rootCA.pem`.
+2. Transfer only that public CA file to the Android phone, for example over USB or a private file-transfer method.
+3. In Android Settings, search for **Install certificate**, choose **CA certificate**, then select `rootCA.pem` and confirm the security warning. Menu names vary by Android version.
+4. Use the same Wi-Fi network, then open `https://<laptop-ip>:5500/camera` in Chrome on the phone.
+
+Do not copy the private key from `.local-certs/`, and do not distribute this development CA outside devices you control.
+
+### 3. Install the Android PWA
+
+The install recommendation appears only for Android phones. On the `/camera` page in Chrome, tap **Install** when the recommendation is shown, then approve Chrome's prompt. The installed app opens directly to the camera page in a focused window.
+
+The laptop page at `https://<laptop-ip>:5500` remains a normal browser-based monitor. It does not register the PWA service worker or show an install recommendation.
+
+If the install recommendation was dismissed, clear the Haptix site data in Chrome and reopen `/camera` to show it again.
+
+### 4. Use the detector
+
+After opening the camera page, grant Chrome camera permission and select the rear camera if necessary. Frames are sent to the laptop for analysis; the annotated output is shown in the laptop monitor, while object, distance, and range-status details are printed in the laptop terminal.
+
+Run `./scripts/create-local-cert.sh` again whenever the laptop moves to a network with a different LAN IP. Restart the server afterwards.
+
+## Docker workflow
+
+Create the certificate on the laptop before starting the container, then mount it read-only:
 
 ```bash
 docker build -t haptix-vision .
 docker run --rm \
   -p 5500:5500 \
-  -e HOST_IP=<YOUR_MAC_LAN_IP> \
+  -e HOST_IP=<YOUR_LAPTOP_LAN_IP> \
+  -v "$PWD/.local-certs:/certs:ro" \
+  -e TLS_CERT_FILE=/certs/haptix-cert.pem \
+  -e TLS_KEY_FILE=/certs/haptix-key.pem \
   haptix-vision
 ```
 
-Replace `<YOUR_MAC_LAN_IP>` with your Mac's current Wi-Fi/LAN address. Both the phone and Mac must be on the same Wi-Fi network.
-
-Open `https://localhost:5500` on the host, or `https://<YOUR_MAC_LAN_IP>:5500/camera` on a phone connected to the same network. Accept the development certificate warning once.
+Replace `<YOUR_LAPTOP_LAN_IP>` with the laptop's current Wi-Fi/LAN address. Complete the Android CA-trust step above before opening the camera URL on the phone.
 
 Runtime settings can be overridden with environment variables, for example:
 
@@ -33,6 +79,6 @@ Runtime settings can be overridden with environment variables, for example:
 docker run --rm -p 5500:5500 -e DETECTION_RANGE_METERS=3 haptix-vision
 ```
 
-The mobile camera page is installable as a PWA. A local HTTPS certificate is required for mobile camera access; accept the browser's certificate warning once when using the development server.
+## Notes
 
 Distance values are monocular estimates for objects with known reference widths. They are not depth measurements; use a calibrated camera or depth sensor when distance accuracy is critical.

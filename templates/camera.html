@@ -15,8 +15,17 @@
   <main class="camera-shell">
     <header class="app-header compact-header">
       <a class="brand" href="/">Haptix <span>Camera</span></a>
-      <button id="install-btn" class="install-button is-hidden" title="Install app">Install</button>
     </header>
+    <aside id="install-recommendation" class="install-recommendation is-hidden" aria-live="polite">
+      <div>
+        <strong>Install Haptix Camera</strong>
+        <span>Keep the camera one tap away and use it in a focused, full-screen window.</span>
+      </div>
+      <div class="install-actions">
+        <button id="install-btn" class="install-button" type="button">Install</button>
+        <button id="dismiss-install" class="dismiss-install" type="button" aria-label="Dismiss install recommendation">Not now</button>
+      </div>
+    </aside>
     <section class="camera-stage">
       <video id="video" autoplay playsinline muted></video>
       <canvas id="canvas" hidden></canvas>

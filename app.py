@@ -2,6 +2,7 @@ from base64 import b64encode
 from io import BytesIO
 import math
 import os
+from pathlib import Path
 import socket
 from threading import Lock
 from time import perf_counter, time
@@ -12,6 +13,7 @@ from ultralytics import YOLO
 
 
 app = Flask(__name__)
+PROJECT_DIR = Path(__file__).resolve().parent
 
 MODEL_NAME = os.getenv("YOLO_MODEL", "yolo26n.pt")
 DETECTION_RANGE_METERS = float(os.getenv("DETECTION_RANGE_METERS", "2"))
@@ -195,6 +197,21 @@ def get_local_ip():
         sock.close()
 
 
+def get_ssl_context():
+    """Use a trusted mkcert certificate when one has been created locally.
+
+    The adhoc fallback keeps Docker and first-time development usable, but it
+    does not provide the browser trust needed for a reliable mobile PWA.
+    """
+    certificate = Path(os.getenv("TLS_CERT_FILE", PROJECT_DIR / ".local-certs" / "haptix-cert.pem"))
+    private_key = Path(os.getenv("TLS_KEY_FILE", PROJECT_DIR / ".local-certs" / "haptix-key.pem"))
+    if certificate.is_file() and private_key.is_file():
+        return str(certificate), str(private_key)
+    print(f"{ANSI_YELLOW}Trusted TLS certificate not found. Falling back to an adhoc certificate. "
+          f"Run ./scripts/create-local-cert.sh to enable trusted HTTPS.{ANSI_RESET}")
+    return "adhoc"
+
+
 if __name__ == "__main__":
     ip = os.environ.get("HOST_IP") or get_local_ip()
     print("\n" + "=" * 58)
@@ -202,6 +219,6 @@ if __name__ == "__main__":
     print("=" * 58)
     print(f"\n  Laptop monitor: https://{ip}:5500")
     print(f"  Mobile camera:  https://{ip}:5500/camera")
-    print("\n  Use the same Wi-Fi network and accept the local certificate once.")
+    print("\n  Use the same Wi-Fi network. Run ./scripts/create-local-cert.sh for trusted HTTPS.")
     print("  Detection details will appear here in the terminal.\n")
-    app.run(host="0.0.0.0", port=5500, debug=False, ssl_context="adhoc")
+    app.run(host="0.0.0.0", port=5500, debug=False, ssl_context=get_ssl_context())

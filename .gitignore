@@ -1,2 +1,2 @@
-.DS_Store
-venv/
+.local-certs/
+__pycache__/
