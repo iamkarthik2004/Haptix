@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#08151d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/app-icon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <title>Haptix Camera</title>
+</head>
+<body>
+  <main class="camera-shell">
+    <header class="app-header compact-header">
+      <a class="brand" href="/">Haptix <span>Camera</span></a>
+      <button id="install-btn" class="install-button is-hidden" title="Install app">Install</button>
+    </header>
+    <section class="camera-stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas" hidden></canvas>
+      <div class="camera-hud">
+        <span id="camera-status"><i></i> Starting rear camera</span>
+        <span id="camera-rate">-- fps</span>
+      </div>
+    </section>
+    <section class="camera-controls">
+      <label class="camera-select">
+        <span>Camera</span>
+        <select id="camera-select" aria-label="Camera source"></select>
+      </label>
+      <span class="range-chip">{{ range_meters }} m range</span>
+    </section>
+    <section class="camera-actions">
+      <button id="restart-camera" class="restart-button">Restart Camera</button>
+    </section>
+  </main>
+  <script src="/static/pwa.js"></script>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const cameraStatus = document.getElementById('camera-status');
+    const cameraRate = document.getElementById('camera-rate');
+    const cameraSelect = document.getElementById('camera-select');
+    let stream = null, running = false, sending = false, framesCompleted = 0, rateStartedAt = 0;
+
+    function setStatus(message, connected = false) {
+      cameraStatus.innerHTML = `<i class="${connected ? 'online' : ''}"></i>${message}`;
+    }
+
+    async function listCameras() {
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      cameraSelect.innerHTML = devices.map((d, i) => `<option value="${d.deviceId}">${d.label || `Camera ${i + 1}`}</option>`).join('');
+      const rear = devices.find((d) => /back|rear|environment/i.test(d.label));
+      if (rear) cameraSelect.value = rear.deviceId;
+      return rear?.deviceId || devices[0]?.deviceId;
+    }
+
+    async function startCamera(deviceId) {
+      running = false;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      setStatus('Requesting rear camera');
+      try {
+        const constraints = {
+          audio: false,
+          video: deviceId
+            ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        await video.play();
+        const selectedId = await listCameras();
+        if (!deviceId && selectedId && !/back|rear|environment/i.test(stream.getVideoTracks()[0].label)) {
+          return startCamera(selectedId);
+        }
+        running = true;
+        sending = false;
+        framesCompleted = 0;
+        rateStartedAt = performance.now();
+        setStatus('Streaming to server', true);
+        sendFrame();
+      } catch (error) {
+        setStatus(`Camera unavailable: ${error.message || error.name}`);
+      }
+    }
+
+    function sendFrame() {
+      if (!running || sending || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        if (running) window.setTimeout(sendFrame, 120);
+        return;
+      }
+      sending = true;
+      const ratio = Math.min(1, 960 / video.videoWidth);
+      canvas.width = Math.round(video.videoWidth * ratio);
+      canvas.height = Math.round(video.videoHeight * ratio);
+      canvas.getContext('2d', { alpha: false }).drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(async (blob) => {
+        try {
+          const body = new FormData();
+          body.append('frame', blob, 'rear-camera.jpg');
+          const response = await fetch('/analyze', { method: 'POST', body });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Analysis failed');
+          framesCompleted += 1;
+          const elapsed = (performance.now() - rateStartedAt) / 1000;
+          cameraRate.textContent = `${(framesCompleted / Math.max(elapsed, 0.1)).toFixed(1)} fps`;
+        } catch (error) {
+          setStatus(`Connection lost: ${error.message}`);
+        } finally {
+          sending = false;
+          if (running) window.setTimeout(sendFrame, 80);
+        }
+      }, 'image/jpeg', 0.78);
+    }
+
+    cameraSelect.addEventListener('change', () => startCamera(cameraSelect.value));
+    document.getElementById('restart-camera').addEventListener('click', () => startCamera(cameraSelect.value || undefined));
+    window.addEventListener('beforeunload', () => { running = false; if (stream) stream.getTracks().forEach((t) => t.stop()); });
+    startCamera();
+  </script>
+</body>
+</html>

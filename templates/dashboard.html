@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08151d">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/styles.css">
+  <title>Haptix Vision</title>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="/">Haptix <span>Vision</span></a>
+      <div class="header-controls">
+        <span class="connection"><i id="connection-dot"></i><span id="connection-text">Waiting for camera</span></span>
+      </div>
+    </header>
+    <section class="monitor-grid">
+      <section class="viewer" aria-label="Live camera feed">
+        <div class="viewer-toolbar">
+          <span class="eyebrow">Live rear camera</span>
+          <span id="frame-age" class="muted">No frames received</span>
+        </div>
+        <div class="image-stage">
+          <img id="live-frame" alt="Live camera feed" hidden>
+          <div id="empty-state" class="empty-state">
+            <strong>Awaiting camera frames</strong>
+            <span>Open the capture address on the mobile device.</span>
+          </div>
+        </div>
+      </section>
+    </section>
+    <section class="capture-address" aria-label="Mobile capture address">
+      <div>
+        <span class="eyebrow">Mobile capture address</span>
+        <a id="camera-url" href="/camera">/camera</a>
+      </div>
+      <button id="copy-camera-url" class="command-button">Copy address</button>
+    </section>
+  </main>
+  <script>
+    const frame = document.getElementById('live-frame');
+    const emptyState = document.getElementById('empty-state');
+    const connectionText = document.getElementById('connection-text');
+    const connectionDot = document.getElementById('connection-dot');
+    const frameAge = document.getElementById('frame-age');
+    const cameraUrl = document.getElementById('camera-url');
+    const captureUrl = `${window.location.origin}/camera`;
+    cameraUrl.href = captureUrl;
+    cameraUrl.textContent = captureUrl;
+
+    async function refreshMonitor() {
+      try {
+        const response = await fetch('/latest', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Monitor unavailable');
+        const data = await response.json();
+        const isLive = data.image && data.received_at && (Date.now() / 1000 - data.received_at < 4);
+        connectionText.textContent = isLive ? 'Camera connected' : 'Waiting for camera';
+        connectionDot.classList.toggle('online', Boolean(isLive));
+        if (data.image) { frame.src = data.image; frame.hidden = false; emptyState.hidden = true; }
+        frameAge.textContent = data.received_at ? `${isLive ? 'Live' : 'Last frame'} · ${Math.max(0, Math.round(Date.now() / 1000 - data.received_at))}s ago` : 'No frames received';
+      } catch (error) {
+        connectionText.textContent = 'Monitor offline';
+        connectionDot.classList.remove('online');
+      } finally {
+        window.setTimeout(refreshMonitor, 350);
+      }
+    }
+
+    document.getElementById('copy-camera-url').addEventListener('click', async (event) => {
+      try { await navigator.clipboard.writeText(captureUrl); event.currentTarget.textContent = 'Copied'; }
+      catch { event.currentTarget.textContent = 'Copy unavailable'; }
+      window.setTimeout(() => { event.currentTarget.textContent = 'Copy address'; }, 1800);
+    });
+
+    refreshMonitor();
+  </script>
+</body>
+</html>

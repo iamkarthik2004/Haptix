@@ -1,0 +1,12 @@
+{
+  "name": "Haptix Camera",
+  "short_name": "Haptix",
+  "description": "Rear-camera object detection. Sends frames to the connected laptop for analysis.",
+  "start_url": "/camera",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#08151d",
+  "theme_color": "#08151d",
+  "categories": ["utilities"],
+  "icons": [{ "src": "/static/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
