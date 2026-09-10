@@ -20,6 +20,6 @@ COPY app.py yolo26n.pt ./
 COPY static ./static
 COPY templates ./templates
 
-EXPOSE 5500
+EXPOSE 5500 5501
 
 CMD ["python", "app.py"]

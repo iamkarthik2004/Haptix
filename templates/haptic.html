@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#08151d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/app-icon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <title>Haptix Receiver</title>
+</head>
+<body>
+  <main class="haptic-shell">
+    <header class="app-header">
+      <a class="brand" href="/">Haptix <span>Receiver</span></a>
+      <span class="connection"><i id="connection-dot"></i><span id="connection-text">Connecting</span></span>
+    </header>
+    <aside id="install-recommendation" class="install-recommendation is-hidden" aria-live="polite">
+      <div>
+        <strong>Install Haptix Receiver</strong>
+        <span>Keep vibration alerts one tap away in a focused, full-screen app.</span>
+      </div>
+      <div class="install-actions">
+        <button id="install-btn" class="install-button" type="button">Install</button>
+        <button id="dismiss-install" class="dismiss-install" type="button" aria-label="Dismiss install recommendation">Not now</button>
+      </div>
+    </aside>
+    <section id="haptic-card" class="haptic-card clear" aria-live="polite">
+      <span id="level" class="eyebrow">Waiting for signal</span>
+      <div id="strength" class="haptic-strength">0%</div>
+      <div id="signal-bars" class="signal-bars" aria-label="Haptic strength"><i></i><i></i><i></i><i></i><i></i></div>
+      <strong id="message">No obstacle in the haptic zone</strong>
+      <span id="detail">The server will send feedback inside {{ range_meters }} m.</span>
+    </section>
+    <section class="receiver-info">
+      <div><span class="eyebrow">Received pattern</span><code id="pattern">—</code></div>
+      <div><span class="eyebrow">Repeat interval</span><span id="repeat">—</span></div>
+    </section>
+    <button id="enable-haptics" class="haptics-button" type="button">Enable phone vibration</button>
+    <p id="haptics-note" class="haptics-note">Keep this page open on each Android phone. Vibration begins automatically after enabling it.</p>
+  </main>
+  <script>window.HAPTIX_PWA_KIND = 'haptic';</script>
+  <script src="/static/pwa.js"></script>
+  <script>
+    const card = document.getElementById('haptic-card');
+    const level = document.getElementById('level');
+    const strength = document.getElementById('strength');
+    const message = document.getElementById('message');
+    const detail = document.getElementById('detail');
+    const pattern = document.getElementById('pattern');
+    const repeat = document.getElementById('repeat');
+    const bars = [...document.querySelectorAll('#signal-bars i')];
+    const connectionDot = document.getElementById('connection-dot');
+    const connectionText = document.getElementById('connection-text');
+    const enableButton = document.getElementById('enable-haptics');
+    const note = document.getElementById('haptics-note');
+    let vibrationEnabled = false;
+    let nextVibrationAt = 0;
+
+    function updateSignal(data) {
+      const activeBars = Math.ceil((data.strength || 0) / 20);
+      card.className = `haptic-card ${data.level || 'clear'} ${data.active ? 'is-active' : ''}`;
+      level.textContent = data.active ? `${data.level} alert` : 'All clear';
+      strength.textContent = `${data.strength || 0}%`;
+      message.textContent = data.message || 'No obstacle in the haptic zone';
+      detail.textContent = data.active && data.position === 'up'
+        ? 'Up-position obstacle: enhanced walking-direction warning.'
+        : data.active ? 'Distance-based warning received from the server.' : 'The server is monitoring the detection zone.';
+      pattern.textContent = data.pattern?.length ? `[${data.pattern.join(', ')}] ms` : '—';
+      repeat.textContent = data.repeat_ms ? `every ${data.repeat_ms} ms` : '—';
+      bars.forEach((bar, index) => bar.classList.toggle('active', index < activeBars));
+
+      if (!data.active) {
+        navigator.vibrate?.(0);
+        nextVibrationAt = 0;
+        return;
+      }
+      const now = Date.now();
+      if (vibrationEnabled && now >= nextVibrationAt) {
+        navigator.vibrate?.(data.pattern);
+        nextVibrationAt = now + data.repeat_ms;
+      }
+    }
+
+    enableButton.addEventListener('click', () => {
+      if (!navigator.vibrate) {
+        note.textContent = 'This browser does not expose the Android Vibration API.';
+        return;
+      }
+      vibrationEnabled = true;
+      navigator.vibrate(35);
+      enableButton.textContent = 'Phone vibration enabled';
+      enableButton.disabled = true;
+      note.textContent = 'This phone will now play the received distance and direction alerts.';
+    });
+
+    const stream = new EventSource('/events');
+    stream.addEventListener('open', () => {
+      connectionDot.classList.add('online');
+      connectionText.textContent = 'Server connected';
+    });
+    stream.addEventListener('haptic', (event) => updateSignal(JSON.parse(event.data)));
+    stream.addEventListener('error', () => {
+      connectionDot.classList.remove('online');
+      connectionText.textContent = 'Reconnecting';
+    });
+    window.addEventListener('pagehide', () => navigator.vibrate?.(0));
+  </script>
+</body>
+</html>

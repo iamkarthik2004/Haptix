@@ -1,4 +1,6 @@
 let installPrompt;
+const pwaKind = window.HAPTIX_PWA_KIND || 'camera';
+const serviceWorkerUrl = pwaKind === 'haptic' ? '/haptic-service-worker.js' : '/service-worker.js';
 const recommendation = document.getElementById('install-recommendation');
 const installBtn = document.getElementById('install-btn');
 const dismissBtn = document.getElementById('dismiss-install');
@@ -42,7 +44,7 @@ dismissBtn?.addEventListener('click', () => {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     if (isAndroidPhone) {
-      await navigator.serviceWorker.register('/service-worker.js');
+      await navigator.serviceWorker.register(serviceWorkerUrl);
       return;
     }
     const registrations = await navigator.serviceWorker.getRegistrations();

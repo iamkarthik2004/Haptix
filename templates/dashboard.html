@@ -41,6 +41,13 @@
       </div>
       <button id="copy-camera-url" class="command-button">Copy address</button>
     </section>
+    <section class="capture-address" aria-label="Haptic receiver address">
+      <div>
+        <span class="eyebrow">Haptic receiver address · open on both Android phones</span>
+        <a id="haptic-url" href="#">Loading receiver address</a>
+      </div>
+      <button id="copy-haptic-url" class="command-button">Copy address</button>
+    </section>
   </main>
   <script src="/static/pwa.js"></script>
   <script>
@@ -52,8 +59,12 @@
     const upPositionStatus = document.getElementById('up-position-status');
     const cameraUrl = document.getElementById('camera-url');
     const captureUrl = `${window.location.origin}/camera`;
+    const hapticUrl = `${window.location.protocol}//${window.location.hostname}:{{ haptic_port }}`;
     cameraUrl.href = captureUrl;
     cameraUrl.textContent = captureUrl;
+    const hapticUrlLink = document.getElementById('haptic-url');
+    hapticUrlLink.href = hapticUrl;
+    hapticUrlLink.textContent = hapticUrl;
 
     async function refreshMonitor() {
       try {
@@ -80,6 +91,11 @@
 
     document.getElementById('copy-camera-url').addEventListener('click', async (event) => {
       try { await navigator.clipboard.writeText(captureUrl); event.currentTarget.textContent = 'Copied'; }
+      catch { event.currentTarget.textContent = 'Copy unavailable'; }
+      window.setTimeout(() => { event.currentTarget.textContent = 'Copy address'; }, 1800);
+    });
+    document.getElementById('copy-haptic-url').addEventListener('click', async (event) => {
+      try { await navigator.clipboard.writeText(hapticUrl); event.currentTarget.textContent = 'Copied'; }
       catch { event.currentTarget.textContent = 'Copy unavailable'; }
       window.setTimeout(() => { event.currentTarget.textContent = 'Copy address'; }, 1800);
     });

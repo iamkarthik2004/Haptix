@@ -4,22 +4,30 @@ import math
 import os
 from pathlib import Path
 import socket
-from threading import Lock
+from threading import Condition, Lock, Thread
 from time import perf_counter, time
+import json
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
+from werkzeug.serving import make_server
 
 
 app = Flask(__name__)
 PROJECT_DIR = Path(__file__).resolve().parent
+haptic_app = Flask(
+    "haptix_haptic_receiver",
+    template_folder=str(PROJECT_DIR / "templates"),
+    static_folder=str(PROJECT_DIR / "static"),
+)
 
 MODEL_NAME = os.getenv("YOLO_MODEL", "yolo26n.pt")
 DETECTION_RANGE_METERS = float(os.getenv("DETECTION_RANGE_METERS", "2"))
 CAMERA_HORIZONTAL_FOV_DEGREES = float(os.getenv("CAMERA_HORIZONTAL_FOV_DEGREES", "65"))
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.35"))
 UP_POSITION_MAX_FRAME_RATIO = float(os.getenv("UP_POSITION_MAX_FRAME_RATIO", "0.333"))
+HAPTIC_PORT = int(os.getenv("HAPTIC_PORT", "5501"))
 model = YOLO(MODEL_NAME)
 
 REFERENCE_WIDTHS_METERS = {
@@ -40,6 +48,14 @@ latest_lock = Lock()
 latest_frame = {
     "frame_id": 0, "image": None, "detections": [], "inference_ms": None,
     "received_at": None, "source_size": None,
+}
+
+# Any number of Android phones can connect to this separate receiver service.
+haptic_condition = Condition()
+latest_haptic = {
+    "frame_id": 0, "active": False, "level": "clear", "strength": 0,
+    "distance_m": None, "position": None, "label": None, "pattern": [],
+    "repeat_ms": 0, "message": "No obstacle in the haptic zone", "updated_at": None,
 }
 
 
@@ -74,6 +90,67 @@ def vertical_position(box, frame_height):
 
 def position_message(position):
     return "Object at up position" if position == "up" else None
+
+
+def build_haptic_alert(detections):
+    """Turn the most urgent in-range detection into a browser haptic cue.
+
+    Browser vibration APIs use duration rather than motor amplitude. Stronger
+    feedback is therefore represented by longer, denser bursts and a shorter
+    repeat interval. An `up` obstacle gets its own stronger warning pattern.
+    """
+    candidates = [
+        detection for detection in detections
+        if detection["distance_m"] is not None and detection["distance_m"] <= DETECTION_RANGE_METERS
+    ]
+    if not candidates:
+        return {
+            "active": False, "level": "clear", "strength": 0,
+            "distance_m": None, "position": None, "label": None,
+            "pattern": [], "repeat_ms": 0,
+            "message": "No obstacle in the haptic zone",
+        }
+
+    def urgency(detection):
+        closeness = 1 - (detection["distance_m"] / DETECTION_RANGE_METERS)
+        return closeness * 100 + (20 if detection["position"] == "up" else 0)
+
+    target = max(candidates, key=urgency)
+    distance = target["distance_m"]
+    if distance <= 0.5:
+        level, strength, pattern, repeat_ms = "danger", 100, [220, 45, 220, 45, 220], 420
+    elif distance <= 1.0:
+        level, strength, pattern, repeat_ms = "high", 82, [150, 55, 150, 55, 150], 680
+    elif distance <= 1.5:
+        level, strength, pattern, repeat_ms = "medium", 58, [130, 110, 130], 1050
+    else:
+        level, strength, pattern, repeat_ms = "low", 35, [140], 1450
+
+    if target["position"] == "up":
+        strength = min(100, strength + 25)
+        if distance > 1.5:
+            pattern, repeat_ms = [220, 55, 220], 1000
+        elif distance > 1.0:
+            pattern, repeat_ms = [190, 50, 190, 50, 190], 800
+        elif distance > 0.5:
+            pattern, repeat_ms = [175, 40, 175, 40, 175, 40, 175], 560
+        else:
+            pattern, repeat_ms = [260, 35, 260, 35, 260, 35, 260], 330
+
+    direction = "up / walking direction" if target["position"] == "up" else target["position"]
+    return {
+        "active": True, "level": level, "strength": strength,
+        "distance_m": distance, "position": target["position"], "label": target["label"],
+        "pattern": pattern, "repeat_ms": repeat_ms,
+        "message": f"{target['label'].title()} at {distance:.1f} m · {direction}",
+    }
+
+
+def publish_haptic(frame_id, detections):
+    alert = build_haptic_alert(detections)
+    with haptic_condition:
+        latest_haptic.update(alert, frame_id=frame_id, updated_at=time())
+        haptic_condition.notify_all()
 
 
 def print_terminal_detections(frame_id, detections):
@@ -124,7 +201,10 @@ def encode_frame(image):
 
 @app.get("/")
 def dashboard():
-    return render_template("dashboard.html", range_meters=DETECTION_RANGE_METERS, model_name=MODEL_NAME)
+    return render_template(
+        "dashboard.html", range_meters=DETECTION_RANGE_METERS,
+        model_name=MODEL_NAME, haptic_port=HAPTIC_PORT,
+    )
 
 
 @app.get("/camera")
@@ -178,6 +258,7 @@ def analyze():
                 "detections": detections,
                 "inference_ms": inference_ms,
             }
+        publish_haptic(frame_id, detections)
         return jsonify(response)
     except Exception as error:
         app.logger.exception("Frame analysis failed")
@@ -206,6 +287,51 @@ def service_worker():
     response.headers["Service-Worker-Allowed"] = "/"
     response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@haptic_app.get("/")
+def haptic_receiver():
+    return render_template("haptic.html", range_meters=DETECTION_RANGE_METERS)
+
+
+@haptic_app.get("/manifest.webmanifest")
+def haptic_manifest():
+    return haptic_app.send_static_file("haptic-manifest.webmanifest")
+
+
+@haptic_app.get("/service-worker.js")
+def haptic_service_worker():
+    response = haptic_app.send_static_file("haptic-service-worker.js")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@haptic_app.get("/latest")
+def haptic_latest():
+    with haptic_condition:
+        return jsonify(latest_haptic.copy())
+
+
+@haptic_app.get("/events")
+def haptic_events():
+    def stream():
+        last_frame_id = -1
+        while True:
+            with haptic_condition:
+                haptic_condition.wait_for(
+                    lambda: latest_haptic["frame_id"] != last_frame_id,
+                    timeout=15,
+                )
+                payload = latest_haptic.copy()
+                last_frame_id = payload["frame_id"]
+            yield f"event: haptic\ndata: {json.dumps(payload)}\n\n"
+
+    return Response(
+        stream_with_context(stream()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def get_local_ip():
@@ -241,6 +367,12 @@ if __name__ == "__main__":
     print("=" * 58)
     print(f"\n  Laptop monitor: https://{ip}:5500")
     print(f"  Mobile camera:  https://{ip}:5500/camera")
+    print(f"  Haptic phones:  https://{ip}:{HAPTIC_PORT}")
     print("\n  Use the same Wi-Fi network. Run ./scripts/create-local-cert.sh for trusted HTTPS.")
     print("  Detection details will appear here in the terminal.\n")
-    app.run(host="0.0.0.0", port=5500, debug=False, ssl_context=get_ssl_context())
+    ssl_context = get_ssl_context()
+    haptic_server = make_server(
+        "0.0.0.0", HAPTIC_PORT, haptic_app, ssl_context=ssl_context, threaded=True,
+    )
+    Thread(target=haptic_server.serve_forever, daemon=True).start()
+    app.run(host="0.0.0.0", port=5500, debug=False, ssl_context=ssl_context, threaded=True)
