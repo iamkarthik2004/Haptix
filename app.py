@@ -54,8 +54,9 @@ latest_frame = {
 haptic_condition = Condition()
 latest_haptic = {
     "frame_id": 0, "active": False, "level": "clear", "strength": 0,
-    "distance_m": None, "position": None, "label": None, "pattern": [],
-    "repeat_ms": 0, "message": "No obstacle in the haptic zone", "updated_at": None,
+    "distance_m": None, "position": None, "horizontal": None, "label": None,
+    "pattern": [], "repeat_ms": 0,
+    "message": "No obstacle in the haptic zone", "updated_at": None,
 }
 
 
@@ -92,6 +93,26 @@ def position_message(position):
     return "Object at up position" if position == "up" else None
 
 
+def horizontal_position(box, frame_width):
+    """Classify an object by the horizontal center of its bounding box."""
+    if frame_width <= 0:
+        return "unknown"
+    center_x_ratio = ((box[0] + box[2]) / 2) / frame_width
+    if center_x_ratio <= 0.333:
+        return "left"
+    if center_x_ratio >= 0.667:
+        return "right"
+    return "center"
+
+
+def horizontal_message(horizontal):
+    if horizontal == "left":
+        return "Object at left position"
+    if horizontal == "right":
+        return "Object at right position"
+    return None
+
+
 def build_haptic_alert(detections):
     """Turn the most urgent in-range detection into a browser haptic cue.
 
@@ -113,7 +134,9 @@ def build_haptic_alert(detections):
 
     def urgency(detection):
         closeness = 1 - (detection["distance_m"] / DETECTION_RANGE_METERS)
-        return closeness * 100 + (20 if detection["position"] == "up" else 0)
+        position_bonus = 20 if detection["position"] == "up" else 0
+        horizontal_bonus = 15 if detection.get("horizontal") in {"left", "right"} else 0
+        return closeness * 100 + position_bonus + horizontal_bonus
 
     target = max(candidates, key=urgency)
     distance = target["distance_m"]
@@ -136,11 +159,17 @@ def build_haptic_alert(detections):
             pattern, repeat_ms = [175, 40, 175, 40, 175, 40, 175], 560
         else:
             pattern, repeat_ms = [260, 35, 260, 35, 260, 35, 260], 330
+    elif target.get("horizontal") == "left":
+        pattern, repeat_ms = [160, 50, 160], 950
+        strength = max(strength, 65)
+    elif target.get("horizontal") == "right":
+        pattern, repeat_ms = [160, 50, 160], 950
+        strength = max(strength, 65)
 
-    direction = "up / walking direction" if target["position"] == "up" else target["position"]
+    direction = "up / walking direction" if target["position"] == "up" else target.get("horizontal") or target["position"]
     return {
         "active": True, "level": level, "strength": strength,
-        "distance_m": distance, "position": target["position"], "label": target["label"],
+        "distance_m": distance, "position": target["position"], "horizontal": target.get("horizontal"), "label": target["label"],
         "pattern": pattern, "repeat_ms": repeat_ms,
         "message": f"{target['label'].title()} at {distance:.1f} m · {direction}",
     }
@@ -173,8 +202,9 @@ def print_terminal_detections(frame_id, detections):
             color = ANSI_YELLOW
             marker = "UNKNOWN"
         position = det["position"].upper()
+        horizontal = det.get("horizontal", "center").upper()
         alert = f" | {ANSI_YELLOW}OBJECT AT UP POSITION{ANSI_RESET}" if det["position"] == "up" else ""
-        print(f"  Object {i:<3} | {dist:>6} | {color}● {marker}{ANSI_RESET} | {position}{alert}")
+        print(f"  Object {i:<3} | {dist:>6} | {color}● {marker}{ANSI_RESET} | {position} | {horizontal}{alert}")
 
 
 def draw_detections(image, detections):
@@ -184,8 +214,9 @@ def draw_detections(image, detections):
     for i, detection in enumerate(detections, 1):
         x1, y1, x2, y2 = detection["box"]
         color = colors[detection["range_state"]]
+        horizontal = detection.get("horizontal", "center").upper()
         draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
-        label = f"Object {i} · {detection['position'].upper()}"
+        label = f"Object {i} · {detection['position'].upper()} · {horizontal}"
         label_box = draw.textbbox((x1, y1), label)
         label_top = max(0, y1 - (label_box[3] - label_box[1]) - 10)
         draw.rectangle((x1, label_top, label_box[2] + 8, y1), fill=color)
@@ -229,6 +260,7 @@ def analyze():
             label = result.names[class_id]
             distance_m = estimate_distance(label, coordinates, image.width)
             position = vertical_position(coordinates, image.height)
+            horizontal = horizontal_position(coordinates, image.width)
             detections.append({
                 "class_id": class_id,
                 "label": label,
@@ -238,6 +270,8 @@ def analyze():
                 "range_state": range_state(distance_m),
                 "position": position,
                 "position_message": position_message(position),
+                "horizontal": horizontal,
+                "horizontal_message": horizontal_message(horizontal),
             })
 
         with latest_lock:

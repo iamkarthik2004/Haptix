@@ -28,11 +28,17 @@
       </div>
     </aside>
     <section id="haptic-card" class="haptic-card clear" aria-live="polite">
-      <span id="level" class="eyebrow">Waiting for signal</span>
-      <div id="strength" class="haptic-strength">0%</div>
-      <div id="signal-bars" class="signal-bars" aria-label="Haptic strength"><i></i><i></i><i></i><i></i><i></i></div>
-      <strong id="message">No obstacle in the haptic zone</strong>
-      <span id="detail">The server will send feedback inside {{ range_meters }} m.</span>
+      <p id="level" class="haptic-level"></p>
+      <p id="message" class="haptic-message"></p>
+      <p id="detail" class="haptic-detail"></p>
+      <div class="haptic-metrics">
+        <span>Strength <strong id="strength"></strong></span>
+        <span>Position <strong id="position"></strong></span>
+        <span>Direction <strong id="horizontal"></strong></span>
+      </div>
+      <div class="signal-bars" id="signal-bars" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i>
+      </div>
     </section>
     <section class="receiver-info">
       <div><span class="eyebrow">Received pattern</span><code id="pattern">—</code></div>
@@ -51,6 +57,8 @@
     const detail = document.getElementById('detail');
     const pattern = document.getElementById('pattern');
     const repeat = document.getElementById('repeat');
+    const positionEl = document.getElementById('position');
+    const horizontalEl = document.getElementById('horizontal');
     const bars = [...document.querySelectorAll('#signal-bars i')];
     const connectionDot = document.getElementById('connection-dot');
     const connectionText = document.getElementById('connection-text');
@@ -64,10 +72,18 @@
       card.className = `haptic-card ${data.level || 'clear'} ${data.active ? 'is-active' : ''}`;
       level.textContent = data.active ? `${data.level} alert` : 'All clear';
       strength.textContent = `${data.strength || 0}%`;
+      positionEl.textContent = data.active ? (data.position || '—').toUpperCase() : '—';
+      horizontalEl.textContent = data.active ? (data.horizontal || '—').toUpperCase() : '—';
       message.textContent = data.message || 'No obstacle in the haptic zone';
       detail.textContent = data.active && data.position === 'up'
         ? 'Up-position obstacle: enhanced walking-direction warning.'
-        : data.active ? 'Distance-based warning received from the server.' : 'The server is monitoring the detection zone.';
+        : data.active && data.horizontal === 'left'
+          ? 'Left-side alert: stronger vibration on left approach.'
+          : data.active && data.horizontal === 'right'
+            ? 'Right-side alert: stronger vibration on right approach.'
+            : data.active
+              ? 'Distance-based warning received from the server.'
+              : 'The server is monitoring the detection zone.';
       pattern.textContent = data.pattern?.length ? `[${data.pattern.join(', ')}] ms` : '—';
       repeat.textContent = data.repeat_ms ? `every ${data.repeat_ms} ms` : '—';
       bars.forEach((bar, index) => bar.classList.toggle('active', index < activeBars));
